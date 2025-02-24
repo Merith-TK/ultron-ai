@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ncruces/zenity"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -19,24 +20,16 @@ type UltronConfig struct {
 }
 
 type AIProviderConfig struct {
-	Backend  string         `toml:"backend"`
-	DeepSeek DeepSeekConfig `toml:"deepseek,omitempty"`
-	OpenAI   OpenAIConfig   `toml:"openai,omitempty"`
-	Custom   CustomConfig   `toml:"custom,omitempty"`
+	Backend  string          `toml:"backend"`
+	Prompt   string          `toml:"prompt"`
+	DeepSeek CommonAPIConfig `toml:"deepseek"`
+	OpenAI   CommonAPIConfig `toml:"openai"`
+	Custom   CommonAPIConfig `toml:"custom"`
 }
 
-type DeepSeekConfig struct {
+type CommonAPIConfig struct {
+	URL   string `toml:"url,omitempty"`
 	Key   string `toml:"key"`
-	Model string `toml:"model"`
-}
-
-type OpenAIConfig struct {
-	Key   string `toml:"key"`
-	Model string `toml:"model"`
-}
-
-type CustomConfig struct {
-	URL   string `toml:"url"`
 	Model string `toml:"model"`
 }
 
@@ -50,7 +43,7 @@ func loadConfig() error {
 			cfg = Config{
 				AIProvider: AIProviderConfig{
 					Backend: "openai",
-					OpenAI: OpenAIConfig{
+					OpenAI: CommonAPIConfig{
 						Key:   "default-key",
 						Model: "default-model",
 					},
@@ -79,6 +72,12 @@ func loadConfig() error {
 
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// If default values are used, display a popup using zenity
+	if cfg.AIProvider.OpenAI.Key == "default-key" && cfg.AIProvider.OpenAI.Model == "default-model" {
+		zenity.Warning("Default values are used for OpenAI API key and model. Please update them in the config file.")
+		os.Exit(1)
 	}
 
 	return nil
