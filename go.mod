@@ -3,6 +3,7 @@ module github.com/Merith-TK/ultron-ai
 go 1.24.0
 
 require (
+	github.com/Merith-TK/utils v0.0.0-20241022045459-1018f4b81f87
 	github.com/cohesion-org/deepseek-go v1.2.4
 	github.com/ncruces/zenity v0.10.14
 	github.com/pelletier/go-toml/v2 v2.2.3
@@ -15,6 +16,6 @@ require (
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/josephspurrier/goversioninfo v1.4.1 // indirect
 	github.com/randall77/makefat v0.0.0-20210315173500-7ddd0e42c844 // indirect
-	golang.org/x/image v0.20.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/image v0.21.0 // indirect
+	golang.org/x/sys v0.26.0 // indirect
 )

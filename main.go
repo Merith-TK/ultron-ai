@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/Merith-TK/utils/debug"
 )
 
 type ChatCompletionMessage struct {
@@ -38,6 +41,9 @@ var (
 )
 
 func main() {
+	flag.Parse()
+	debug.Print("Starting Ultron-AI...")
+
 	if err := loadConfig(); err != nil {
 		fmt.Println("Failed to load config:", err)
 		os.Exit(1)
@@ -46,8 +52,10 @@ func main() {
 	// Initialize the appropriate client based on the backend
 	switch cfg.AIProvider.Backend {
 	case "deepseek":
+		debug.Print("Initializing DeepSeek client...")
 		client = NewDeepSeekClient(cfg.AIProvider.DeepSeek.Key, cfg.AIProvider.DeepSeek.Model)
 	case "openai":
+		debug.Print("Initializing OpenAI client...")
 		client = NewOpenAIClient(cfg.AIProvider.OpenAI.Key, cfg.AIProvider.OpenAI.Model)
 	default:
 		fmt.Println("Unsupported backend:", cfg.AIProvider.Backend)
@@ -57,8 +65,9 @@ func main() {
 	// Initialize conversation history
 	conversationHistory = append(conversationHistory, ChatCompletionMessage{
 		Role:    "system",
-		Content: "You are a helpful assistant.",
+		Content: cfg.AIProvider.Prompt, // Use the prompt from the config
 	})
+	debug.Print("Conversation history initialized with system prompt.")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Ultron-AI ready. Enter a command:")
@@ -69,6 +78,7 @@ func main() {
 			break
 		}
 		input := strings.TrimSpace(scanner.Text())
+		debug.Print("User input:", input)
 
 		if input == "" {
 			continue
@@ -84,6 +94,7 @@ func main() {
 			fmt.Println("Error getting turtle state:", err)
 			continue
 		}
+		debug.Print("Turtle state retrieved:", turtleState)
 
 		// Process user input with AI
 		response, err := processCommand(input, turtleState)
@@ -91,7 +102,6 @@ func main() {
 			fmt.Println("Error processing command:", err)
 			continue
 		}
-
 		fmt.Println("AI Response:", response)
 
 		// Send command to the turtle
@@ -103,6 +113,7 @@ func main() {
 }
 
 func getTurtleState() (string, error) {
+	debug.Print("Fetching turtle state from:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
 	resp, err := http.Get(cfg.Ultron.APIUrl + "/api/turtle/" + cfg.Ultron.TurtleID)
 	if err != nil {
 		return "", err
@@ -114,6 +125,7 @@ func getTurtleState() (string, error) {
 		return "", err
 	}
 
+	debug.Print("Turtle state response:", string(body))
 	return string(body), nil
 }
 
@@ -123,6 +135,7 @@ func processCommand(userInput, turtleState string) (string, error) {
 		Role:    "user",
 		Content: fmt.Sprintf("Turtle State: %s\nUser Command: %s", turtleState, userInput),
 	})
+	debug.Print("Updated conversation history with user input.")
 
 	resp, err := client.CreateChatCompletion(context.Background(), &ChatCompletionRequest{
 		Model:    cfg.AIProvider.OpenAI.Model, // Use the model from the config
@@ -141,6 +154,7 @@ func processCommand(userInput, turtleState string) (string, error) {
 		Role:    "assistant",
 		Content: aiResponse,
 	})
+	debug.Print("Updated conversation history with AI response.")
 
 	return aiResponse, nil
 }
@@ -158,6 +172,7 @@ func cleanAIResponse(response string) string {
 }
 
 func sendToTurtle(command string) error {
+	debug.SetTitle("TURTLE")
 	var parsedCommands []string
 	command = strings.TrimSuffix(command, "```")
 	command = strings.TrimPrefix(command, "```json")
@@ -181,11 +196,19 @@ func sendToTurtle(command string) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
+	debug.Print("Sending command to turtle:", string(requestBody))
+	debug.Print("Turtle API URL:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	debug.Print("Response from turtle API:", resp.Status)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	debug.Print("Response body:", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to send command to turtle: %s", resp.Status)
