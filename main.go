@@ -10,51 +10,56 @@ import (
 	"os"
 	"regexp"
 	"strings"
-
-	openai "github.com/sashabaranov/go-openai"
 )
 
-const (
-	turtleAPIURL = "https://skynet.merith.xyz/api/turtle/0"
-	openAIModel  = "gpt-4o-mini"
-)
-
-var (
-	openAIAPIKey = os.Getenv("OPENAI_API_KEY")
-	aiPrompt     = os.Getenv("OPENAI_PROMPT")
-	client       *openai.Client
-)
-
-var conversationHistory []openai.ChatCompletionMessage
-
-func init() {
-	if openAIAPIKey == "" {
-		if data, err := os.ReadFile("./key.txt"); err == nil {
-			openAIAPIKey = strings.TrimSpace(string(data))
-		} else {
-			fmt.Println("Missing OpenAI API key.")
-			os.Exit(1)
-		}
-	}
-
-	if aiPrompt == "" {
-		if data, err := os.ReadFile("./prompt.md"); err == nil {
-			aiPrompt = strings.TrimSpace(string(data))
-		} else {
-			fmt.Println("Missing AI prompt.")
-			os.Exit(1)
-		}
-	}
-
-	conversationHistory = append(conversationHistory, openai.ChatCompletionMessage{
-		Role:    "system",
-		Content: aiPrompt,
-	})
-
-	client = openai.NewClient(openAIAPIKey)
+type ChatCompletionMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
+type ChatCompletionRequest struct {
+	Model    string                  `json:"model"`
+	Messages []ChatCompletionMessage `json:"messages"`
+}
+
+type ChatCompletionResponse struct {
+	Choices []struct {
+		Message ChatCompletionMessage `json:"message"`
+	} `json:"choices"`
+}
+
+type AIProvider interface {
+	CreateChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error)
+}
+
+var (
+	client              AIProvider
+	conversationHistory []ChatCompletionMessage
+)
+
 func main() {
+	if err := loadConfig(); err != nil {
+		fmt.Println("Failed to load config:", err)
+		os.Exit(1)
+	}
+
+	// Initialize the appropriate client based on the backend
+	switch cfg.AIProvider.Backend {
+	case "deepseek":
+		client = NewDeepSeekClient(cfg.AIProvider.DeepSeek.Key, cfg.AIProvider.DeepSeek.Model)
+	case "openai":
+		client = NewOpenAIClient(cfg.AIProvider.OpenAI.Key, cfg.AIProvider.OpenAI.Model)
+	default:
+		fmt.Println("Unsupported backend:", cfg.AIProvider.Backend)
+		os.Exit(1)
+	}
+
+	// Initialize conversation history
+	conversationHistory = append(conversationHistory, ChatCompletionMessage{
+		Role:    "system",
+		Content: "You are a helpful assistant.",
+	})
+
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Ultron-AI ready. Enter a command:")
 
@@ -98,7 +103,7 @@ func main() {
 }
 
 func getTurtleState() (string, error) {
-	resp, err := http.Get(turtleAPIURL)
+	resp, err := http.Get(cfg.Ultron.APIUrl + "/api/turtle/" + cfg.Ultron.TurtleID)
 	if err != nil {
 		return "", err
 	}
@@ -114,13 +119,13 @@ func getTurtleState() (string, error) {
 
 func processCommand(userInput, turtleState string) (string, error) {
 	// Send both turtle state and user input to OpenAI
-	conversationHistory = append(conversationHistory, openai.ChatCompletionMessage{
+	conversationHistory = append(conversationHistory, ChatCompletionMessage{
 		Role:    "user",
 		Content: fmt.Sprintf("Turtle State: %s\nUser Command: %s", turtleState, userInput),
 	})
 
-	resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
-		Model:    openAIModel,
+	resp, err := client.CreateChatCompletion(context.Background(), &ChatCompletionRequest{
+		Model:    cfg.AIProvider.OpenAI.Model, // Use the model from the config
 		Messages: conversationHistory,
 	})
 	if err != nil {
@@ -128,11 +133,11 @@ func processCommand(userInput, turtleState string) (string, error) {
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no response from OpenAI")
+		return "", fmt.Errorf("no response from AI")
 	}
 
 	aiResponse := cleanAIResponse(resp.Choices[0].Message.Content)
-	conversationHistory = append(conversationHistory, openai.ChatCompletionMessage{
+	conversationHistory = append(conversationHistory, ChatCompletionMessage{
 		Role:    "assistant",
 		Content: aiResponse,
 	})
@@ -169,7 +174,7 @@ func sendToTurtle(command string) error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", turtleAPIURL, strings.NewReader(string(requestBody)))
+	req, err := http.NewRequest("POST", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID, strings.NewReader(string(requestBody)))
 	if err != nil {
 		return err
 	}
