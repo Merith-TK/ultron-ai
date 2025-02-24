@@ -42,12 +42,19 @@ var (
 
 func main() {
 	flag.Parse()
-	debug.Print("Starting Ultron-AI...")
 
 	if err := loadConfig(); err != nil {
 		fmt.Println("Failed to load config:", err)
 		os.Exit(1)
 	}
+
+	if !debug.GetDebug() {
+		debug.SetDebug(cfg.Debug)
+		debug.Print("Debug mode enabled.")
+	}
+
+	debug.SetTitle("ULTRON-AI")
+	debug.Print("Starting Ultron-AI...")
 
 	// Initialize the appropriate client based on the backend
 	switch cfg.AIProvider.Backend {

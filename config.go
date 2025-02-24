@@ -15,6 +15,7 @@ import (
 var defaultPrompt embed.FS
 
 type Config struct {
+	Debug      bool             `toml:"debug,omitempty"` // Enable debug mode
 	AIProvider AIProviderConfig `toml:"ai_provider"`
 	Ultron     UltronConfig     `toml:"ultron"`
 	PromptFile string           `toml:"prompt_file,omitempty"` // Path to the prompt file
