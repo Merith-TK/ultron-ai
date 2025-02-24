@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"strings"
@@ -9,9 +10,13 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+//go:embed prompt.md
+var defaultPrompt embed.FS
+
 type Config struct {
 	AIProvider AIProviderConfig `toml:"ai_provider"`
 	Ultron     UltronConfig     `toml:"ultron"`
+	PromptFile string           `toml:"prompt_file,omitempty"` // Path to the prompt file
 }
 
 type UltronConfig struct {
@@ -21,7 +26,7 @@ type UltronConfig struct {
 
 type AIProviderConfig struct {
 	Backend  string          `toml:"backend"`
-	Prompt   string          `toml:"prompt"`
+	Prompt   string          `toml:"prompt,omitempty"` // The actual prompt content
 	DeepSeek CommonAPIConfig `toml:"deepseek"`
 	OpenAI   CommonAPIConfig `toml:"openai"`
 	Custom   CommonAPIConfig `toml:"custom"`
@@ -52,6 +57,7 @@ func loadConfig() error {
 					APIUrl:   "http://localhost:3300/",
 					TurtleID: "0",
 				},
+				PromptFile: "./prompt.md", // Default prompt file path
 			}
 
 			// Marshal the default config to TOML
@@ -79,6 +85,46 @@ func loadConfig() error {
 		zenity.Warning("Default values are used for OpenAI API key and model. Please update them in the config file.")
 		os.Exit(1)
 	}
+
+	// Handle the prompt file
+	if err := handlePromptFile(); err != nil {
+		return fmt.Errorf("failed to handle prompt file: %w", err)
+	}
+
+	return nil
+}
+
+func handlePromptFile() error {
+	// Default to ./prompt.md if no prompt file is specified
+	if cfg.PromptFile == "" {
+		cfg.PromptFile = "./prompt.md"
+	}
+
+	// Check if the prompt file exists
+	if _, err := os.Stat(cfg.PromptFile); os.IsNotExist(err) {
+		// If the file doesn't exist, create it with the embedded prompt
+		fmt.Printf("Prompt file '%s' not found. Creating it with the default prompt.\n", cfg.PromptFile)
+
+		// Read the embedded default prompt
+		data, err := defaultPrompt.ReadFile("prompt.md")
+		if err != nil {
+			return fmt.Errorf("failed to read embedded prompt: %w", err)
+		}
+
+		// Write the embedded prompt to the file
+		if err := os.WriteFile(cfg.PromptFile, data, 0644); err != nil {
+			return fmt.Errorf("failed to write prompt file: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check prompt file: %w", err)
+	}
+
+	// Load the prompt content into Config.Prompt
+	promptData, err := os.ReadFile(cfg.PromptFile)
+	if err != nil {
+		return fmt.Errorf("failed to read prompt file: %w", err)
+	}
+	cfg.AIProvider.Prompt = string(promptData)
 
 	return nil
 }
