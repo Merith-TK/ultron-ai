@@ -11,28 +11,28 @@ import (
 	"regexp"
 	"strings"
 
-	openai "github.com/sashabaranov/go-openai"
+	deepseek "github.com/cohesion-org/deepseek-go" // Assuming there's a DeepSeek Go SDK
 )
 
 const (
-	turtleAPIURL = "https://skynet.merith.xyz/api/turtle/0"
-	openAIModel  = "gpt-4o-mini"
+	turtleAPIURL  = "https://skynet.merith.xyz/api/turtle/0"
+	deepseekModel = "deepseek-v3" // Replace with the appropriate DeepSeek model
 )
 
 var (
-	openAIAPIKey = os.Getenv("OPENAI_API_KEY")
-	aiPrompt     = os.Getenv("OPENAI_PROMPT")
-	client       *openai.Client
+	deepseekAPIKey = os.Getenv("DEEPSEEK_API_KEY")
+	aiPrompt       = os.Getenv("DEEPSEEK_PROMPT")
+	client         *deepseek.Client
 )
 
-var conversationHistory []openai.ChatCompletionMessage
+var conversationHistory []deepseek.ChatCompletionMessage
 
 func init() {
-	if openAIAPIKey == "" {
+	if deepseekAPIKey == "" {
 		if data, err := os.ReadFile("./key.txt"); err == nil {
-			openAIAPIKey = strings.TrimSpace(string(data))
+			deepseekAPIKey = strings.TrimSpace(string(data))
 		} else {
-			fmt.Println("Missing OpenAI API key.")
+			fmt.Println("Missing DeepSeek API key.")
 			os.Exit(1)
 		}
 	}
@@ -46,12 +46,12 @@ func init() {
 		}
 	}
 
-	conversationHistory = append(conversationHistory, openai.ChatCompletionMessage{
+	conversationHistory = append(conversationHistory, deepseek.ChatCompletionMessage{
 		Role:    "system",
 		Content: aiPrompt,
 	})
 
-	client = openai.NewClient(openAIAPIKey)
+	client = deepseek.NewClient(deepseekAPIKey)
 }
 
 func main() {
@@ -113,14 +113,14 @@ func getTurtleState() (string, error) {
 }
 
 func processCommand(userInput, turtleState string) (string, error) {
-	// Send both turtle state and user input to OpenAI
-	conversationHistory = append(conversationHistory, openai.ChatCompletionMessage{
+	// Send both turtle state and user input to DeepSeek
+	conversationHistory = append(conversationHistory, deepseek.ChatCompletionMessage{
 		Role:    "user",
 		Content: fmt.Sprintf("Turtle State: %s\nUser Command: %s", turtleState, userInput),
 	})
 
-	resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
-		Model:    openAIModel,
+	resp, err := client.CreateChatCompletion(context.Background(), &deepseek.ChatCompletionRequest{
+		Model:    deepseekModel,
 		Messages: conversationHistory,
 	})
 	if err != nil {
@@ -128,11 +128,11 @@ func processCommand(userInput, turtleState string) (string, error) {
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no response from OpenAI")
+		return "", fmt.Errorf("no response from DeepSeek")
 	}
 
 	aiResponse := cleanAIResponse(resp.Choices[0].Message.Content)
-	conversationHistory = append(conversationHistory, openai.ChatCompletionMessage{
+	conversationHistory = append(conversationHistory, deepseek.ChatCompletionMessage{
 		Role:    "assistant",
 		Content: aiResponse,
 	})
