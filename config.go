@@ -103,8 +103,12 @@ func loadConfig() error {
 		debug.Print("Failed to handle prompt file:", err)
 		return fmt.Errorf("failed to handle prompt file: %w", err)
 	}
-
 	debug.Print("Prompt file handled successfully.")
+
+	// Clean the turtle URL
+	cfg.Ultron.APIUrl = cleanTurtleURL(cfg.Ultron.APIUrl)
+	debug.Print("Turtle URL cleaned successfully.")
+
 	return nil
 }
 
@@ -161,12 +165,6 @@ func cleanTurtleURL(url string) string {
 	// Ensure the URL does not end with a slash
 	url = strings.TrimSuffix(url, "/")
 	debug.Print("URL trimmed of trailing slash.")
-
-	// If the URL does not contain "/api/turtle/", append it along with the TurtleID
-	if !strings.Contains(url, "/api/turtle/") {
-		debug.Print("URL does not contain '/api/turtle/'. Appending it.")
-		url = fmt.Sprintf("%s/api/turtle/%s", url, cfg.Ultron.TurtleID)
-	}
 
 	debug.Print("Cleaned turtle URL:", url)
 	return url
