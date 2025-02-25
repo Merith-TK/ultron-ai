@@ -64,6 +64,9 @@ func main() {
 	case "openai":
 		debug.Print("Initializing OpenAI client...")
 		client = NewOpenAIClient(cfg.AIProvider.OpenAI.Key, cfg.AIProvider.OpenAI.Model)
+	case "custom":
+		debug.Print("Initializing custom AI client...")
+		client = NewCustomAIClient(cfg.AIProvider.Custom.Key, cfg.AIProvider.Custom.Model, cfg.AIProvider.Custom.URL)
 	default:
 		fmt.Println("Unsupported backend:", cfg.AIProvider.Backend)
 		os.Exit(1)
