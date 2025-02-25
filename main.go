@@ -189,8 +189,9 @@ func sendToTurtle(command string) error {
 	command = strings.TrimPrefix(command, "```")
 	command = strings.TrimSpace(command)
 
+	// Validate the command is a valid JSON array
 	if err := json.Unmarshal([]byte(command), &parsedCommands); err != nil {
-		parsedCommands = []string{command} // If not JSON, assume single command
+		return fmt.Errorf("invalid command format: %v", err)
 	}
 
 	// Ensure API receives an array
