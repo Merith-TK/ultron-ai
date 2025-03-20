@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Merith-TK/utils/debug"
 )
@@ -38,92 +39,210 @@ type AIProvider interface {
 var (
 	client              AIProvider
 	conversationHistory []ChatCompletionMessage
+	logFile             *os.File
+	historyFile 	    *os.File
 )
 
 func main() {
 	flag.Parse()
 
+	// Create logs directory if it doesn't exist
+	if _, err := os.Stat("logs"); os.IsNotExist(err) {
+		err := os.Mkdir("logs", 0755)
+		if err != nil {
+			fmt.Println("Failed to create logs directory:", err)
+			os.Exit(1)
+		}
+	}
+
+	// Initialize logging
+	var err error
+	logFile, err = os.OpenFile("logs/runtime.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println("Failed to open log file:", err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	// Initialize history logging
+	historyFile, err = os.OpenFile("logs/history.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println("Failed to open history file:", err)
+		os.Exit(1)
+	}
+
+	log("Starting Ultron-AI...")
+
 	if err := loadConfig(); err != nil {
-		fmt.Println("Failed to load config:", err)
+		log("Failed to load config:", err)
 		os.Exit(1)
 	}
 
 	if !debug.GetDebug() {
 		debug.SetDebug(cfg.Debug)
-		debug.Print("Debug mode enabled.")
+		log("Debug mode enabled.")
 	}
 
 	debug.SetTitle("ULTRON-AI")
-	debug.Print("Starting Ultron-AI...")
 
 	// Initialize the appropriate client based on the backend
+	log("Attempting to initialize AI provider:", cfg.AIProvider.Backend)
 	switch cfg.AIProvider.Backend {
 	case "deepseek":
-		debug.Print("Initializing DeepSeek client...")
 		client = NewDeepSeekClient(cfg.AIProvider.DeepSeek.Key, cfg.AIProvider.DeepSeek.Model)
 	case "openai":
-		debug.Print("Initializing OpenAI client...")
 		client = NewOpenAIClient(cfg.AIProvider.OpenAI.Key, cfg.AIProvider.OpenAI.Model)
 	case "custom":
-		debug.Print("Initializing custom AI client...")
 		client = NewCustomAIClient(cfg.AIProvider.Custom.Key, cfg.AIProvider.Custom.Model, cfg.AIProvider.Custom.URL)
 	default:
-		fmt.Println("Unsupported backend:", cfg.AIProvider.Backend)
 		os.Exit(1)
 	}
 
-	// Initialize conversation history
-	conversationHistory = append(conversationHistory, ChatCompletionMessage{
-		Role:    "system",
-		Content: cfg.AIProvider.Prompt, // Use the prompt from the config
-	})
-	debug.Print("Conversation history initialized with system prompt.")
+	// Load conversation history if it exists
+	if err := loadConversationHistory("conversation_history.json"); err != nil {
+		log("Failed to load conversation history:", err)
+	}
 
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Println("Ultron-AI ready. Enter a command:")
+	// Initialize conversation history with system prompt if empty
+	if len(conversationHistory) == 0 {
+		conversationHistory = append(conversationHistory, ChatCompletionMessage{
+			Role:    "system",
+			Content: cfg.AIProvider.Prompt, // Use the prompt from the config
+		})
+		log("Conversation history initialized with system prompt.")
+	} else {
+		log("Resuming from existing conversation history.")
+	}
 
+	// Load initial task from init-task.txt
+	initialTask, err := loadInitialTask("init-task.txt")
+	if err != nil {
+		log("Error loading initial task:", err)
+	} else if initialTask != "" {
+		log("Initial task loaded:", initialTask)
+		conversationHistory = append(conversationHistory, ChatCompletionMessage{
+			Role:    "user",
+			Content: initialTask,
+		})
+	}
+
+	// Start the automated interaction loop
 	for {
-		fmt.Print("$ ")
-		if !scanner.Scan() {
-			break
-		}
-		input := strings.TrimSpace(scanner.Text())
-		debug.Print("User input:", input)
-
-		if input == "" {
-			continue
-		}
-		if strings.ToLower(input) == "exit" {
-			fmt.Println("Exiting Ultron-AI.")
-			break
-		}
-
 		// Get current turtle state
 		turtleState, err := getTurtleState()
 		if err != nil {
-			fmt.Println("Error getting turtle state:", err)
+			log("Error getting turtle state:", err)
+			time.Sleep(5 * time.Second) // Wait before retrying
 			continue
 		}
-		debug.Print("Turtle state retrieved:", turtleState)
+		log("Turtle state retrieved:", turtleState)
 
-		// Process user input with AI
-		response, err := processCommand(input, turtleState)
+		// Process the state with AI
+		response, err := processCommand("", turtleState)
 		if err != nil {
-			fmt.Println("Error processing command:", err)
+			log("Error processing command:", err)
+			time.Sleep(5 * time.Second) // Wait before retrying
 			continue
 		}
-		fmt.Println("AI Response:", response)
+		log("AI Response:", response)
+
+		// Check if the task is complete
+		if isTaskComplete(response) {
+			log("Task completed successfully.")
+			break
+		}
 
 		// Send command to the turtle
 		err = sendToTurtle(response)
 		if err != nil {
-			fmt.Println("Error sending command to turtle:", err)
+			log("Error sending command to turtle:", err)
+			time.Sleep(5 * time.Second) // Wait before retrying
+			continue
 		}
+
+		// Save conversation history after each interaction
+		if err := saveConversationHistory("conversation_history.json"); err != nil {
+			log("Failed to save conversation history:", err)
+		}
+
+		// Wait for the turtle to execute the command
+		time.Sleep(5 * time.Second)
+	}
+
+	// Clear conversation history after task completion
+	if err := clearConversationHistory("conversation_history.json"); err != nil {
+		log("Failed to clear conversation history:", err)
 	}
 }
 
+func loadInitialTask(filename string) (string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var task strings.Builder
+	for scanner.Scan() {
+		task.WriteString(scanner.Text())
+		task.WriteString("\n")
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(task.String()), nil
+}
+
+func loadConversationHistory(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist, start fresh
+		}
+		return err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&conversationHistory); err != nil {
+		return err
+	}
+
+	log("Loaded conversation history from:", filename)
+	return nil
+}
+
+func saveConversationHistory(filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(conversationHistory); err != nil {
+		return err
+	}
+
+	log("Saved conversation history to:", filename)
+	return nil
+}
+
+func clearConversationHistory(filename string) error {
+	if err := os.Remove(filename); err != nil {
+		return err
+	}
+
+	log("Cleared conversation history.")
+	return nil
+}
+
 func getTurtleState() (string, error) {
-	debug.Print("Fetching turtle state from:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
+	log("Fetching turtle state from:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
 	resp, err := http.Get(cfg.Ultron.APIUrl + "/api/turtle/" + cfg.Ultron.TurtleID)
 	if err != nil {
 		return "", err
@@ -135,17 +254,17 @@ func getTurtleState() (string, error) {
 		return "", err
 	}
 
-	debug.Print("Turtle state response:", string(body))
+	log("Turtle state response:", string(body))
 	return string(body), nil
 }
 
 func processCommand(userInput, turtleState string) (string, error) {
-	// Send both turtle state and user input to OpenAI
+	// Send both turtle state and user input to AI
 	conversationHistory = append(conversationHistory, ChatCompletionMessage{
 		Role:    "user",
 		Content: fmt.Sprintf("Turtle State: %s\nUser Command: %s", turtleState, userInput),
 	})
-	debug.Print("Updated conversation history with user input.")
+	log("Updated conversation history with user input.")
 
 	resp, err := client.CreateChatCompletion(context.Background(), &ChatCompletionRequest{
 		Model:    cfg.AIProvider.OpenAI.Model, // Use the model from the config
@@ -164,7 +283,7 @@ func processCommand(userInput, turtleState string) (string, error) {
 		Role:    "assistant",
 		Content: aiResponse,
 	})
-	debug.Print("Updated conversation history with AI response.")
+	log("Updated conversation history with AI response.")
 
 	return aiResponse, nil
 }
@@ -182,7 +301,7 @@ func cleanAIResponse(response string) string {
 }
 
 func sendToTurtle(command string) error {
-	debug.SetTitle("TURTLE")
+	log("Sending command to turtle:", command)
 	var parsedCommands []string
 	command = strings.TrimSuffix(command, "```")
 	command = strings.TrimPrefix(command, "```json")
@@ -207,23 +326,37 @@ func sendToTurtle(command string) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
-	debug.Print("Sending command to turtle:", string(requestBody))
-	debug.Print("Turtle API URL:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
+	log("Sending command to turtle:", string(requestBody))
+	log("Turtle API URL:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	debug.Print("Response from turtle API:", resp.Status)
+	log("Response from turtle API:", resp.Status)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
-	debug.Print("Response body:", string(body))
+	log("Response body:", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to send command to turtle: %s", resp.Status)
 	}
 
 	return nil
+}
+
+func isTaskComplete(response string) bool {
+	// Implement logic to determine if the task is complete
+	// For example, check if the AI response contains a completion message
+	return strings.Contains(strings.ToLower(response), "task complete")
+}
+
+func log(args ...interface{}) {
+	message := fmt.Sprintln(args...)
+	fmt.Print(message)
+	if logFile != nil {
+		logFile.WriteString(message)
+	}
 }

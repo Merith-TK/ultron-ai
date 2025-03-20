@@ -1,2 +1,6 @@
 *key.txt
 config.toml
+/tmp
+/logs
+*.json
+*.log

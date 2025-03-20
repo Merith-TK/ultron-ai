@@ -189,7 +189,3 @@ ultron.data = {
 - Use **`pcall`** to handle potential errors gracefully when interacting with peripherals or executing risky commands.  
 - **Break complex tasks into smaller, sequential steps** to ensure the turtle can execute them correctly.  
 - If a command fails, **provide a clear error message** and suggest corrective actions.  
-
----
-
-This updated prompt provides more examples of valid ComputerCraft turtle code and explicitly states the requirements for the response format. It also includes additional context about the turtle's capabilities and limitations, which should help the AI generate more accurate and valid Lua commands.
