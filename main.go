@@ -40,7 +40,7 @@ var (
 	client              AIProvider
 	conversationHistory []ChatCompletionMessage
 	logFile             *os.File
-	historyFile 	    *os.File
+	historyFile         *os.File
 )
 
 func main() {
@@ -99,7 +99,7 @@ func main() {
 	}
 
 	// Load conversation history if it exists
-	if err := loadConversationHistory("conversation_history.json"); err != nil {
+	if err := loadConversationHistory(); err != nil {
 		log("Failed to load conversation history:", err)
 	}
 
@@ -196,22 +196,13 @@ func loadInitialTask(filename string) (string, error) {
 	return strings.TrimSpace(task.String()), nil
 }
 
-func loadConversationHistory(filename string) error {
-	file, err := os.Open(filename)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // File doesn't exist, start fresh
-		}
-		return err
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
+func loadConversationHistory() error {
+	decoder := json.NewDecoder(historyFile)
 	if err := decoder.Decode(&conversationHistory); err != nil {
 		return err
 	}
 
-	log("Loaded conversation history from:", filename)
+	log("Loaded conversation history from:", historyFile.Name())
 	return nil
 }
 
@@ -289,48 +280,41 @@ func processCommand(userInput, turtleState string) (string, error) {
 }
 
 func cleanAIResponse(response string) string {
-	// Remove markdown-style JSON formatting
-	re := regexp.MustCompile("(?s)```json\\n(.*?)\\n```")
+	// Extract Lua code from markdown code blocks if present
+	re := regexp.MustCompile("(?s)```lua\n(.*?)\n```")
 	matches := re.FindStringSubmatch(response)
 	if len(matches) > 1 {
-		response = matches[1] // Extract the actual JSON content
+		response = matches[1]
 	}
 
-	// Trim whitespace
+	// Remove any remaining markdown or non-Lua code
+	response = strings.TrimSpace(response)
+	response = strings.TrimPrefix(response, "```")
+	response = strings.TrimSuffix(response, "```")
 	return strings.TrimSpace(response)
 }
 
-func sendToTurtle(command string) error {
-	log("Sending command to turtle:", command)
-	var parsedCommands []string
-	command = strings.TrimSuffix(command, "```")
-	command = strings.TrimPrefix(command, "```json")
-	command = strings.TrimPrefix(command, "```")
-	command = strings.TrimSpace(command)
+func sendToTurtle(luaCode string) error {
+	log("Sending Lua code to turtle:", luaCode)
 
-	// Validate the command is a valid JSON array
-	if err := json.Unmarshal([]byte(command), &parsedCommands); err != nil {
-		return fmt.Errorf("invalid command format: %v", err)
+	// Wrap the Lua code in a JSON array with single element
+	commands := []string{luaCode}
+	requestBody, err := json.Marshal(commands)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command: %v", err)
 	}
 
-	// Ensure API receives an array
-	requestBody, err := json.Marshal(parsedCommands)
+	req, err := http.NewRequest("POST", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID,
+		strings.NewReader(string(requestBody)))
 	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID, strings.NewReader(string(requestBody)))
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
-	log("Sending command to turtle:", string(requestBody))
-	log("Turtle API URL:", cfg.Ultron.APIUrl+"/api/turtle/"+cfg.Ultron.TurtleID)
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 	log("Response from turtle API:", resp.Status)
