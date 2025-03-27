@@ -1,0 +1,11 @@
+services:
+  ultron-ai:
+    container_name: ultron-ai
+    image: cosmtrek/air
+    working_dir: /data
+    restart: always
+    volumes:
+      - ./:/data
+    environment:
+      UID: ${USER}
+      GID: ${USER}
